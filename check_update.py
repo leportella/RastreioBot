@@ -13,7 +13,7 @@ usuario = config['CORREIOS']['usuario']
 senha = config['CORREIOS']['senha']
 token = config['CORREIOS']['token']
 
-def check_update(code, max_retries=3):
+async def check_update(session, code, max_retries=3):
     regexp = r"^[A-Za-z]{2}\d{9}[A-Za-z]{2}$"
     if not (re.search(regexp, code)):
         return 2
@@ -36,17 +36,18 @@ def check_update(code, max_retries=3):
             'User-Agent': 'Dalvik/1.6.0 (Linux; U; Android 4.2.1; LG-P875h Build/JZO34L)'
         }
         URL = ('http://webservice.correios.com.br/service/rest/rastro/rastroMobile')
-        response = requests.post(URL, data=request_xml, headers=headers, timeout=3).text
+        response = await session.post(URL, data=request_xml, headers=headers, timeout=3)
     except:
         if max_retries > 0:
             return check_update(code, max_retries-1)
         return 0
-    if len(str(response)) < 10:
+    response_text = await response.text()
+    if len(str(response_text)) < 10:
         return 0
-    elif 'ERRO' in str(response):
+    elif 'ERRO' in str(response_text):
         return 1
     try:
-        result = json.loads(response)
+        result = await response.json()
         tabela = result['objeto'][0]['evento']
     except:
         return 1
