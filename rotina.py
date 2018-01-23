@@ -4,9 +4,7 @@ from datetime import datetime
 from pprint import pprint
 
 import aiohttp
-
-
-timeout = 0
+from pymongo import MongoClient
 
 
 CORREIOS_USER = ''
@@ -17,6 +15,19 @@ CORREIOS_HEADER = {
     'Accept': 'application/json',
     'User-Agent': 'Dalvik/1.6.0 (Linux; U; Android 4.2.1; LG-P875h Build/JZO34L)'
 }
+
+
+FINISHED_STATUS = (
+    'objeto entregue ao',
+    'objeto apreendido por órgão de fiscalização',
+    'objeto devolvido',
+    'objeto roubado',
+)
+
+
+def get_db():
+    client = MongoClient()
+    return client.rastreiobot
 
 
 def request_xml(code):
@@ -35,8 +46,18 @@ def request_xml(code):
 
 
 def pedidos_ativos():
-    print('retorna lista de pedidos ativos')
-    return ['RF486878213SG', 'RS988439567NL', 'RG899838474CN'] * 1000
+    db = get_db()
+    packages = db.rastreiobot.find()
+
+    pkgs_to_check = []
+    for package in packages:
+        last_status = package['stat'][-1].lower()
+        if any(status in last_status for status in FINISHED_STATUS):
+            continue
+
+        pkgs_to_check.append(package['code'])
+
+    return pkgs_to_check
 
 
 async def verifica_pedido(session, code, max_retries=3):
