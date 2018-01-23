@@ -1,10 +1,14 @@
 import asyncio
+import logging
 from time import time
 from datetime import datetime
 from pprint import pprint
 
 import aiohttp
 from pymongo import MongoClient
+
+
+logger = logging.getLogger()
 
 
 CORREIOS_USER = ''
@@ -24,6 +28,11 @@ FINISHED_STATUS = (
     'objeto roubado',
 )
 
+MESSAGE_ICONS = {
+    'objeto entregue ao': str(u'\U0001F381'),
+    'encaminhado': str(u'\U00002197'),
+    'postado': str(u'\U0001F4E6'),
+}
 
 def get_db():
     client = MongoClient()
@@ -45,19 +54,78 @@ def request_xml(code):
              token=CORREIOS_TOKEN, code=code)
 
 
-def pedidos_ativos():
+def pacotes_ativos():
     db = get_db()
-    packages = db.rastreiobot.find()
+    pacotes = db.rastreiobot.find()
 
     pkgs_to_check = []
-    for package in packages:
-        last_status = package['stat'][-1].lower()
+    for pacote in pacotes:
+        last_status = pacote['stat'][-1].lower()
         if any(status in last_status for status in FINISHED_STATUS):
             continue
 
-        pkgs_to_check.append(package['code'])
+        pkgs_to_check.append(pacote['code'])
 
-    return pkgs_to_check
+    return ['RQ066584435MY']
+    return pkgs_to_check[:10]
+
+
+def get_situacao_icone(situacao):
+    for message in MESSAGE_ICONS:
+        if message in situacao:
+            return MESSAGE_ICONS[message]
+
+    return ''
+
+
+def get_data(data, hora):
+    return datetime.strptime('{} {}'.format(data, hora), '%d/%m/%Y %H:%M')
+
+
+def monta_mensagem(evento, primeiro_evento):
+    # Data
+    primeiro_evento_data = get_data(primeiro_evento['data'],
+                                    primeiro_evento['hora'])
+
+    evento_data = get_data(evento['data'], evento['hora'])
+
+    delta = evento_data - primeiro_evento_data
+
+    data = '{:%d/%m/%Y %H:%M}'.format(evento_data)
+    if delta.days == 1:
+        data += ' (1 dia)'
+    elif delta.days > 1:
+        data += ' ({} dias)'.format(delta.days)
+
+    # Local
+    local = evento['unidade'].get('local', '').title()
+
+    # Situacao
+    descricao = evento['descricao'].strip()
+    situacao = '<b>{}</b> {}'.format(descricao, get_situacao_icone(descricao))
+    if 'endereço indicado' in evento['descricao']:
+        situacao = (
+            '{situacao}\n'
+            '{endereco[numero]} {endereco[logradouro}\n'
+            '{endereco[bairro]}'
+        ).format(situacao=situacao, endereco=evento['unidade']['endereco'])
+
+    # Observacao
+    try:
+        observacao = evento['destino'][0]['local']
+    except KeyError:
+        observacao = None
+
+    mensagem = (
+        'Data: {data}\n'
+        'Local: {local}\n'
+        'Situação: {situacao}\n'
+    ).format(data=data, local=local, situacao=situacao)
+
+    if observacao:
+        mensagem += 'Observação: {}\n'.format(observacao)
+
+    return mensagem
 
 
 async def verifica_pedido(session, code, max_retries=3):
@@ -66,21 +134,26 @@ async def verifica_pedido(session, code, max_retries=3):
     xml = request_xml(code)
     url = 'http://webservice.correios.com.br/service/rest/rastro/rastroMobile'
 
-    if max_retries == 0:
-        print('max retries limit')
-        global timeout
-        timeout += 1
-        return
-
-    try:
-        response = await session.post(url, data=xml, headers=CORREIOS_HEADER)
-    except:
-        return await verifica_pedido(session, code, max_retries-1)
+    response = await session.post(url, data=xml, headers=CORREIOS_HEADER)
+    if not response.status == 200:
+        raise Exception()
 
     data = await response.json()
-    evento = data['objeto'][0]['evento']
-    pprint(evento)
-    return evento
+
+    if data['objeto'][0]['categoria'].startswith('ERRO'):
+        logger.warning(data['objeto'][0]['categoria'])
+        return
+
+    return data['objeto'][0]['evento']
+
+
+async def atualiza_pacotes(session):
+    pacotes = pacotes_ativos()
+    for pacote in pacotes:
+        eventos = await verifica_pedido(session, pacote)
+        if eventos:
+            for evento in reversed(eventos):
+                print(monta_mensagem(evento, eventos[-1]))
 
 
 def main():
@@ -88,17 +161,14 @@ def main():
 
     loop = asyncio.get_event_loop()
     session = aiohttp.ClientSession(loop=loop)
-    task_list = [verifica_pedido(session, pedido) for pedido in pedidos_ativos()]
-    super_task = asyncio.wait(task_list)
-    done, _ = loop.run_until_complete(super_task)
+
+    loop.run_until_complete(atualiza_pacotes(session))
     loop.close()
     session.close()
 
-    global timeout
     print()
     print('Tempo total: {}s'.format(time() - start))
-    print('Total: {}'.format(len(pedidos_ativos())))
-    print('Timeout: {}'.format(timeout))
+    print('Total: {}'.format(len(pacotes_ativos())))
 
 
 if __name__ == '__main__':
