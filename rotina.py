@@ -64,7 +64,7 @@ def pacotes_ativos():
         if any(status in last_status for status in FINISHED_STATUS):
             continue
 
-        pkgs_to_check.append(pacote['code'])
+        pkgs_to_check.append((pacote['code'], len(pacote['stat'])))
 
     return ['RQ066584435MY']
     return pkgs_to_check[:10]
@@ -106,7 +106,7 @@ def monta_mensagem(evento, primeiro_evento):
     if 'endereço indicado' in evento['descricao']:
         situacao = (
             '{situacao}\n'
-            '{endereco[numero]} {endereco[logradouro}\n'
+            '{endereco[numero]} {endereco[logradouro]}\n'
             '{endereco[bairro]}'
         ).format(situacao=situacao, endereco=evento['unidade']['endereco'])
 
@@ -129,7 +129,6 @@ def monta_mensagem(evento, primeiro_evento):
 
 
 async def verifica_pedido(session, code, max_retries=3):
-    print('verificando pedido: %s' % code)
     stats = []
     xml = request_xml(code)
     url = 'http://webservice.correios.com.br/service/rest/rastro/rastroMobile'
@@ -141,19 +140,41 @@ async def verifica_pedido(session, code, max_retries=3):
     data = await response.json()
 
     if data['objeto'][0]['categoria'].startswith('ERRO'):
-        logger.warning(data['objeto'][0]['categoria'])
+        # logger.warning(data['objeto'][0]['categoria'])
         return
 
     return data['objeto'][0]['evento']
 
 
 async def atualiza_pacotes(session):
+    db = get_db()
+
     pacotes = pacotes_ativos()
-    for pacote in pacotes:
+    for pacote, num_stats in pacotes:
         eventos = await verifica_pedido(session, pacote)
-        if eventos:
-            for evento in reversed(eventos):
-                print(monta_mensagem(evento, eventos[-1]))
+        if not eventos:
+            continue
+
+        if len(eventos) == num_stats:
+            continue
+
+        print(pacote)
+
+        stats = ['{} <b>{}</b>'.format(u'\U0001F4EE', pacote)]
+        for evento in reversed(eventos):
+            stats.append(monta_mensagem(evento, eventos[-1]))
+
+        db.rastreiobot.update_one(
+            {
+                'code': pacote.upper()
+            },
+            {
+                '$set': {
+                    'stat' : stats,
+                    'time' : str(time())
+                }
+            }
+        )
 
 
 def main():
