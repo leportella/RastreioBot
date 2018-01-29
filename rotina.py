@@ -20,7 +20,6 @@ CORREIOS_HEADER = {
     'User-Agent': 'Dalvik/1.6.0 (Linux; U; Android 4.2.1; LG-P875h Build/JZO34L)'
 }
 
-
 FINISHED_STATUS = (
     'objeto entregue ao',
     'objeto apreendido por órgão de fiscalização',
@@ -34,9 +33,28 @@ MESSAGE_ICONS = {
     'postado': str(u'\U0001F4E6'),
 }
 
+TELEGRAM_TOKEN = ''
+
+
 def get_db():
     client = MongoClient()
     return client.rastreiobot
+
+
+await def send_message(user, message, session):
+    url = 'https://api.telegram.org/bot{}/sendMessage'
+
+    data = {
+        'chat_id': user,
+        'text': message,
+        'parse_mode': 'html',
+        'disable_web_page_preview': True,
+    }
+
+    response = await session.post(url.format(TELEGRAM_TOKEN), json=data)
+    if not response.status_code == 200:
+        logging.warning('Error while sending message: %s',
+                        await response.json())
 
 
 def request_xml(code):
@@ -64,10 +82,9 @@ def pacotes_ativos():
         if any(status in last_status for status in FINISHED_STATUS):
             continue
 
-        pkgs_to_check.append((pacote['code'], len(pacote['stat'])))
+        pkgs_to_check.append((pacote['code'], len(pacote['stat']), pacote['users']))
 
-    return ['RQ066584435MY']
-    return pkgs_to_check[:10]
+    return pkgs_to_check
 
 
 def get_situacao_icone(situacao):
@@ -146,11 +163,12 @@ async def verifica_pedido(session, code, max_retries=3):
     return data['objeto'][0]['evento']
 
 
+
 async def atualiza_pacotes(session):
     db = get_db()
 
     pacotes = pacotes_ativos()
-    for pacote, num_stats in pacotes:
+    for pacote, num_stats, users in pacotes:
         eventos = await verifica_pedido(session, pacote)
         if not eventos:
             continue
@@ -175,6 +193,9 @@ async def atualiza_pacotes(session):
                 }
             }
         )
+
+        for user in users:
+            await send_message(user, stats[-1], session=session)
 
 
 def main():
