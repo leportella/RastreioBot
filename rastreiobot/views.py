@@ -7,6 +7,10 @@ async def welcome(message):
     return render(message, 'welcome.md')
 
 
+async def info(message):
+    return render(message, 'bot_info.md')
+
+
 async def add_package(message):
     tracking_code = message.text.split()[0]
     content = {'tracking_code': tracking_code}
@@ -20,6 +24,7 @@ async def add_package(message):
     else:
         if message.user.id not in package.users:
             package.users.append(message.user.id)
+            package.save()
             package_added = True
 
     if package_added:
@@ -28,5 +33,21 @@ async def add_package(message):
     return render(message, 'package_already_added.md', content)
 
 
-async def info(message):
-    return render(message, 'bot_info.md')
+async def delete_package_info(message):
+    return render(message, 'delete_package_info.md')
+
+
+async def delete_package(message):
+    tracking_code = message.text.split()[1]
+
+    try:
+        package = Package.objects.get(tracking_code=tracking_code)
+    except Package.DoesNotExist:
+        return render(message, 'package_doesnt_exist.md')
+
+    package.users.remove(message.user.id)
+    if package.users:
+        package.save()
+    else:
+        package.delete()
+    return render(message, 'package_deleted_successfuly.md')
