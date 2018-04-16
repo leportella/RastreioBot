@@ -1,4 +1,5 @@
 from decouple import config
+from mongoengine import connect
 
 HOSTNAME = 'localhost'
 
@@ -12,3 +13,5 @@ PLATFORMS = {
         }
     },
 }
+
+connect('rastreiobot')
