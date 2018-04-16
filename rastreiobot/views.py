@@ -28,4 +28,5 @@ async def add_package(message):
     return render(message, 'package_already_added.md', content)
 
 
-
+async def info(message):
+    return render(message, 'bot_info.md')

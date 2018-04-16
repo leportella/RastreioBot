@@ -1,9 +1,10 @@
 from bottery import handlers
 
-from views import add_package, welcome
+from views import add_package, info, welcome
 
 
 msghandlers = [
     handlers.message('/start', welcome),
+    handlers.message('/info', info),
     handlers.regex(r'^[A-Za-z]{2}\d{9}[A-Za-z]{2}$', add_package),
 ]
